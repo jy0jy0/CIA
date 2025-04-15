@@ -1,7 +1,6 @@
 # Causal Representation Learning for OOD Recommendation
 
-본 프로젝트는 논문  **"Causal Representation Learning for Out-of-Distribution Recommendation"** 을 바탕으로 인과 표현 학습 기반 추천 시스템을 구현하고, 이를 LLM 기반 추천 에이전트로 확장하는 것을 목표로 합니다.
-
+논문  "Causal Representation Learning for Out-of-Distribution Recommendation" 을 바탕으로 인과 표현 학습 기반 추천 시스템을 구현하고, 이를 LLM 기반 추천 에이전트로 확장하는 것을 목표로 합니다.
 
 ## 주간 일정 (2025.04.08 ~ 2025.05.20)
 
@@ -16,68 +15,81 @@
 | 5/20 (7주차) | 회고  | 전체 구조 리뷰, 코드 리팩토링, 문서화 및 기능 정리 |
 
 
-## 진행 상황 (2025.04.08 기준)
+## 진행 상황 (2025.04.15 기준)
 
-### 사용 데이터
+### Preprocessing
 
-| 데이터셋   | 설명 |
-|------------|------|
-| **Synthetic** | 논문 내 toy 실험 재현용 인위적 데이터셋<br>유저 1,000명, 아이템 1,000개, IID/OOD/X_OOD 세트 포함 |
-| **Meituan** | 실제 상업용 추천 데이터셋<br>유저 2,145명, 아이템 7,189개, OOD 분포 구성 포함 |
+- user feature / item feature가 all-zero vector인 경우 제거
+- 이외의 추가적인 interaction 수 기준 필터링은 논문에는 명시되어 있지 않음
+- 우리는 논문 기준 전처리만 우선 적용
+
+**전처리 적용 결과:**
+- Interaction 수는 약 14,000건 유지
+- zero vector 제거로 noise 감소
+
+### Experiment Results
+
+#### Step 1: COR Pretrain (논문 전처리 기준)
+
+- dropout=0.5, 100 epochs 기준 학습
+- Precision@10: 0.0008 / Recall@10: 0.0079
+- OOD 성능도 낮음 (Precision@10: 0.0005)
+
+| 항목 | 값 |
+| --- | --- |
+| 학습 사용자 수 | 7096명 |
+| 학습 아이템 수 | 5260개 |
+| 학습 인터랙션 수 | 14192건 |
+| Sparsity | 0.9996 |
+
+#### Step 2: OOD Fine-tuning
+
+- `-ood_finetune` 옵션 적용
+- 대부분 초반(2~8 epoch)에 Best epoch 발생
+- Recall, NDCG 큰 변화 없음
+
+#### Step 3: Dropout Variation
+
+| Dropout | Precision@10 | Recall@10 | NDCG@10 |
+| --- | --- | --- | --- |
+| 0.2 | 0.0011 | 0.0112 | 0.0063 |
+| 0.5 | 0.0009 | 0.0172 | 0.0078 |
+| 0.7 | 0.0008 | 0.0159 | 0.0071 |
+
+→ Recall 기준으로는 0.5가 가장 안정적
+
+#### Step 4: Additional Filtering
+
+- 유저 5회 이상 클릭, 아이템 10회 이상 선택 조건
+- interaction 수 급감 (iid 40, ood 2건)
+- 모델 학습 불가능 → 실험 불가
+
+---
+
+### Key Factors of Performance Drop
+
+#### (1) 데이터 희소성
+
+- Sparsity 0.9996 → 유저당 평균 interaction 수 매우 적음
+- OOD 유저 feature는 대부분 unseen → 학습 어려움
+
+#### (2) Z1 / Z2 분리 성능 미흡
+
+- 데이터가 적어 Z2가 의도를 충분히 포착하지 못함
+
+#### (3) 논문 구현과의 구조 차이
+
+- 일부 layer 정의 및 forward 구조에서 차이 존재
 
 
+### Next Step
 
-### 모델 및 실험 설정
+#### 1: Meituan 데이터 정제
 
-- 모델: `COR`, `COR_G`  
-- 목적: 인과 표현 학습 기반 Z1 (추천용), Z2 (OOD 적응용) 분리
-- 평가 지표: Precision / Recall / NDCG / MRR (Top-N 기준)
+- [user, item] 쌍 리스트 → `user → items` binary vector 구조로 변환
+- MultiVAE, RecVAE와의 비교 실험에 활용
 
+#### 2: Baseline 모델과 비교
 
-### 주요 결과
-
-#### 1. Synthetic (COR 모델)
-
-| Metric     | @10   | @20   | @50   | @100  |
-|------------|--------|--------|--------|--------|
-| Precision  | 0.2626 | 0.2273 | 0.1642 | 0.1106 |
-| Recall     | 0.1832 | 0.3086 | 0.5543 | 0.7506 |
-| NDCG       | 0.2899 | 0.3029 | 0.4041 | 0.4807 |
-| MRR        | 0.4692 | 0.4745 | 0.4768 | 0.4771 |
-
-- OOD 성능: Recall 및 NDCG 모두 높은 편  
-- 논문 성능과 유사한 분포로 재현 성공
-
-
-
-#### 2. Meituan
-
-**COR 결과**
-
-| Metric     | @10   | @20   | @50   | @100  |
-|------------|--------|--------|--------|--------|
-| Precision  | 0.0317 | 0.0268 | 0.0212 | 0.0153 |
-| Recall     | 0.1446 | 0.2542 | 0.4718 | 0.6749 |
-| NDCG       | 0.1553 | 0.1865 | 0.2856 | 0.3511 |
-
-**COR_G 결과 (GCN 적용)**
-
-| Metric     | @10    | @20    | @50    | @100   |
-|------------|---------|---------|---------|---------|
-| Precision  | 0.0011  | 0.0009  | 0.0006  | 0.0005  |
-| Recall     | 0.0112  | 0.0172  | 0.0294  | 0.0480  |
-| NDCG       | 0.0063  | 0.0078  | 0.0102  | 0.0132  |
-| MRR        | 0.0047  | 0.0052  | 0.0055  | 0.0058  |
-
-
-
-### 문제점 및 해결 방향
-
-- `COR_G` 모델 성능 저하: GCN 구조와 hidden size mismatch로 학습 불안정
-- Z1/Z2 병합 시 차원 오류 및 decode layer 차원 오류 발생
-- Meituan 데이터에서는 구조에 민감한 경향 → 다양한 구조 튜닝 필요
-
-**해결 방향**
-- 구조 재설계 및 MLP 차원 동기화
-- 기존 베이스라인(MultiVAE 등)과 동일 환경 비교 예정
-- 질의형 추천 및 LLM 연동 실험 준비 중
+- MultiVAE, CDAE, RecVAE 등 구현은 되어 있음
+- COR와 동일 조건에서 성능 비교 실험 필요
